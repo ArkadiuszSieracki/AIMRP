@@ -1,0 +1,28 @@
+# AIMRP Peer — local development config
+# Uses Ollama as model backend (small local model)
+
+peer:
+  identity:
+    key_path: "./peer-key.pem"         # generated on first run if missing
+
+  network:
+    listen_address: "0.0.0.0:8080"
+    public_address: "localhost:8080"   # change to reachable host for multi-peer setups
+
+  roles:
+    - planner
+    - reasoner
+    - critic
+
+  model_adapter:
+    type: openai-compatible
+    endpoint: http://localhost:11434/v1  # Ollama default
+    model: llama3.2:3b                  # small local model
+    api_key: ""                         # not needed for Ollama
+
+  dht:
+    bootstrap_address: "localhost:4000" # local DHT bootstrap node
+    ttl_seconds: 3600
+
+  liveness:
+    heartbeat_interval_seconds: 60

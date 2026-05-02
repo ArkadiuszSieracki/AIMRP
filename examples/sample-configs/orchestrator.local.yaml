@@ -1,0 +1,12 @@
+# AIMRP Orchestrator — local development config
+
+orchestrator:
+  reputation_threshold: -0.5           # exclude peers below this reputation score
+  liveness_window_seconds: 30          # peers must respond within this window
+  max_task_retries: 2                  # retry failed tasks on backup peer
+
+  consensus:
+    algorithm: weighted-majority        # weighted-majority | bft (v0.2)
+
+  dht:
+    bootstrap_address: "localhost:4000" # local DHT bootstrap node

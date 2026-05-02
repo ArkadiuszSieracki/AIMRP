@@ -1,0 +1,27 @@
+# AIMRP Peer — cloud / large model config
+# Uses OpenAI GPT-4o as model backend
+
+peer:
+  identity:
+    key_path: "/secrets/peer-key.pem"  # use secrets manager path in production
+
+  network:
+    listen_address: "0.0.0.0:8080"
+    public_address: "my-peer.example.com:8080"
+
+  roles:
+    - reasoner
+    - critic
+
+  model_adapter:
+    type: openai-compatible
+    endpoint: https://api.openai.com/v1
+    model: gpt-4o
+    api_key: "${OPENAI_API_KEY}"        # must be set as environment variable
+
+  dht:
+    bootstrap_address: "bootstrap.aimrp.example.com:4000"
+    ttl_seconds: 3600
+
+  liveness:
+    heartbeat_interval_seconds: 60
