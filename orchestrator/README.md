@@ -234,11 +234,3 @@ orchestrator:
   dht:
     bootstrap_address: "host:port"
 ```
-
-## 10. Hand-off to Sprint 5
-
-Sprint 5 (peer design) will consume:
-- Peer API contracts from docs/api-peer.md
-- `IDhtClient` interface (for DhtPublisher in peer node)
-- `IModelAdapter` interface (defined in this sprint, see section 7)
-- `IConsensusEngine` — NOT needed in peer; consensus lives in orchestrator only

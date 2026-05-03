@@ -270,10 +270,3 @@ peer:
     heartbeat_interval_seconds: 60
 ```
 
-## 11. Hand-off to Sprint 6
-
-Sprint 6 (DX and CLI) will consume:
-- `peer.yaml` config schema (section 10) — CLI commands will generate or validate this
-- Startup lifecycle (section 3) — quickstart guide describes this sequence
-- `GET /capabilities` — CLI uses it to inspect a live peer
-- `IModelAdapter` adapter types — "How to implement your own peer" guide covers this

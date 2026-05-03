@@ -180,15 +180,7 @@ interface ISessionManager
 }
 ```
 
-## 7. Hand-off to Sprint 4
-
-Sprint 4 must produce:
-- Concrete implementation of all interfaces above
-- `orchestrator/README.md` with module diagram
-- `docs/consensus-design.md` with PBFT/HotStuff comparison and decision
-- Sequence diagrams for SESSION_INIT → CONSENSUS flow
-
-## 8. PeerFilter Definition
+## 7. PeerFilter Definition
 
 `PeerFilter` is the structured query passed to `IDhtClient.LookupAsync` and `IPeerDiscoveryClient.FindPeersAsync`.
 
