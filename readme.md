@@ -97,4 +97,16 @@ examples/sample-configs/
 
 ## License
 
-Specification only. Implementation license TBD.
+AIMRP uses a dual‑license model:
+
+- **Code** (reference implementation, tools, examples):  
+  Licensed under the **Apache License 2.0**.  
+  This allows commercial use, modification, redistribution, and integration into proprietary systems, while requiring preservation of copyright notices and providing patent protection.
+
+- **Documentation** (RFC, protocol specification, design documents, diagrams):  
+  Licensed under **CC‑BY 4.0**.  
+  You may copy, modify, translate, and redistribute the documentation for any purpose, including commercial, as long as proper attribution is provided.
+
+See:
+- `LICENSE` for the Apache 2.0 terms  
+- `LICENSE.docs` for the CC‑BY 4.0 terms
