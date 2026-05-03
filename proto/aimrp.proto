@@ -68,13 +68,22 @@ message TaskStep {
 
 // ErrorDetail carries structured error information.
 message ErrorDetail {
-  ErrorCode code    = 1;
-  string    message = 2;
+  ErrorCode           code    = 1;
+  string              message = 2;
+  map<string, string> details = 3; // optional structured context (e.g. peer_id, retry_after_ms)
 }
 
 // ErrorResponse is the top-level error envelope returned by all HTTP endpoints on failure.
 message ErrorResponse {
   ErrorDetail error = 1;
+}
+
+// Error is a transport-agnostic error embedded in domain responses (e.g. InferResponse).
+// Equivalent in shape to ErrorDetail; provided as a stable inline type for non-HTTP transports.
+message Error {
+  string              code    = 1; // canonical error code (see RFC §14)
+  string              message = 2;
+  map<string, string> details = 3;
 }
 
 // PeerManifest is the signed DHT record published by each peer.
@@ -90,11 +99,14 @@ message PeerManifest {
   string             nonce              = 9; // anti-replay random string
   bytes              signature          = 10;
   uint32             ttl_seconds        = 11; // record lifetime; 0 = use network default
+  string             protocol_version   = 12; // e.g. "0.1" — REQUIRED, covered by signature; prevents DHT-layer downgrade
 }
 
 // ─── /capabilities ────────────────────────────────────────────────────────────
 
-message CapabilitiesRequest {}
+message CapabilitiesRequest {
+  string protocol_version = 1; // REQUIRED, mirrors AIMRP-Version header
+}
 
 message CapabilitiesResponse {
   string             peer_id           = 1;  // hex-encoded SHA-256 of Ed25519 pubkey
@@ -109,49 +121,64 @@ message CapabilitiesResponse {
 // ─── /infer ───────────────────────────────────────────────────────────────────
 
 message InferRequest {
-  string session_id = 1; // UUID
-  string task_id    = 2; // UUID
-  string prompt     = 3;
-  uint32 max_tokens = 4;
-  Role   role       = 5; // role the peer should adopt for this task
+  string          session_id       = 1;  // UUID
+  string          task_id          = 2;  // UUID
+  string          prompt           = 3;
+  uint32          max_tokens       = 4;
+  Role            role             = 5;  // role the peer should adopt for this task
+  string          protocol_version = 6;  // e.g. "0.1"; mirrors AIMRP-Version header (REQUIRED)
+  string          model_name       = 7;  // optional explicit model selection; "" = peer default
+  // Optional sampling controls. Peers MAY ignore unsupported parameters.
+  double          temperature      = 8;  // [0.0, 2.0]; 0 = deterministic; <0 = unset
+  double          top_p            = 9;  // (0.0, 1.0]; <=0 = unset
+  repeated string stop             = 10; // optional stop sequences
 }
 
 message InferResponse {
-  string     task_id    = 1;
-  string     completion = 2;
-  double     confidence = 3; // [0.0, 1.0]
-  UsageStats usage      = 4;
-  bytes      signature  = 5;
+  string     task_id          = 1;
+  string     completion       = 2;
+  double     confidence       = 3; // [0.0, 1.0]
+  UsageStats usage            = 4;
+  bytes      signature        = 5;
+  string     protocol_version = 6; // echo of negotiated version (REQUIRED)
+  string     model_name       = 7; // model that actually produced the completion
+  Error      error            = 8; // OPTIONAL; present iff the call failed and HTTP status != 2xx
 }
 
 // ─── /plan ────────────────────────────────────────────────────────────────────
 
 message PlanRequest {
-  string session_id = 1; // UUID
-  string problem    = 2;
-  string context    = 3;
+  string session_id       = 1; // UUID
+  string problem          = 2;
+  string context          = 3;
+  string protocol_version = 4; // REQUIRED, mirrors AIMRP-Version header
 }
 
 message PlanResponse {
-  string            session_id = 1;
-  repeated TaskStep steps      = 2;
-  bytes             signature  = 3;
+  string            session_id       = 1;
+  repeated TaskStep steps            = 2;
+  bytes             signature        = 3;
+  string            protocol_version = 4; // REQUIRED
+  Error             error            = 5; // OPTIONAL; failure envelope
 }
 
 // ─── /score ───────────────────────────────────────────────────────────────────
 
 message ScoreRequest {
-  string                  session_id = 1; // UUID
-  string                  task_id    = 2; // UUID
-  string                  answer     = 3;
-  repeated ScoreCriterion criteria   = 4;
+  string                  session_id       = 1; // UUID
+  string                  task_id          = 2; // UUID
+  string                  answer           = 3;
+  repeated ScoreCriterion criteria         = 4;
+  string                  protocol_version = 5; // REQUIRED
 }
 
 message ScoreResponse {
-  string              task_id   = 1;
-  map<string, double> scores    = 2; // criterion name => score [0.0, 1.0]
-  double              overall   = 3; // [0.0, 1.0]
-  bytes               signature = 4;
+  string              task_id          = 1;
+  map<string, double> scores           = 2; // criterion name => score [0.0, 1.0]
+  double              overall          = 3; // [0.0, 1.0]
+  bytes               signature        = 4;
+  string              protocol_version = 5; // REQUIRED
+  Error               error            = 6; // OPTIONAL; failure envelope
 }
 
 // ─── DHT types ────────────────────────────────────────────────────────────────

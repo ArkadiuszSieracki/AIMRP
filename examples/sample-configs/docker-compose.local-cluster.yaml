@@ -1,0 +1,72 @@
+# AIMRP — local cluster (planner + 2× reasoner + critic + orchestrator)
+# Spins up a self-contained AIMRP mesh on a single machine. Useful for
+# developer testing of consensus and DHT discovery without external infra.
+#
+# Prerequisites:
+#   - Local Ollama at host `ollama:11434` with `llama3.2:3b` pulled.
+#   - AIMRP container image built and tagged as `aimrp:0.1.0`.
+
+version: "3.9"
+
+services:
+  bootstrap:
+    image: aimrp:0.1.0
+    command: ["aimrp", "dht", "bootstrap", "--listen", "0.0.0.0:4000"]
+    ports:
+      - "4000:4000"
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  peer-planner:
+    image: aimrp:0.1.0
+    depends_on: [bootstrap, ollama]
+    command: ["aimrp", "peer", "start", "--config", "/cfg/peer.planner.yaml"]
+    volumes:
+      - ./peer.planner.yaml:/cfg/peer.planner.yaml:ro
+    ports:
+      - "8081:8080"
+
+  peer-reasoner-1:
+    image: aimrp:0.1.0
+    depends_on: [bootstrap, ollama]
+    command: ["aimrp", "peer", "start", "--config", "/cfg/peer.reasoner.yaml"]
+    volumes:
+      - ./peer.reasoner.yaml:/cfg/peer.reasoner.yaml:ro
+    ports:
+      - "8082:8080"
+
+  peer-reasoner-2:
+    image: aimrp:0.1.0
+    depends_on: [bootstrap, ollama]
+    command: ["aimrp", "peer", "start", "--config", "/cfg/peer.reasoner.yaml"]
+    volumes:
+      - ./peer.reasoner.yaml:/cfg/peer.reasoner.yaml:ro
+    ports:
+      - "8083:8080"
+
+  peer-critic:
+    image: aimrp:0.1.0
+    depends_on: [bootstrap, ollama]
+    command: ["aimrp", "peer", "start", "--config", "/cfg/peer.critic.yaml"]
+    volumes:
+      - ./peer.critic.yaml:/cfg/peer.critic.yaml:ro
+    ports:
+      - "8084:8080"
+
+  orchestrator:
+    image: aimrp:0.1.0
+    depends_on: [bootstrap, peer-planner, peer-reasoner-1, peer-reasoner-2, peer-critic]
+    command: ["aimrp", "orchestrator", "start", "--config", "/cfg/orchestrator.full.yaml"]
+    volumes:
+      - ./orchestrator.full.yaml:/cfg/orchestrator.full.yaml:ro
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+
+volumes:
+  ollama-data:

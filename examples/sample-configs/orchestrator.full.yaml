@@ -1,0 +1,41 @@
+# AIMRP Orchestrator — full production profile
+# Demonstrates the complete configurable surface: peer selection,
+# retry/backoff, consensus, reputation, and DHT.
+
+orchestrator:
+  reputation_threshold: 0.0              # admit peers with non-negative reputation
+  liveness_window_seconds: 30
+  max_task_retries: 3                    # hard cap; retries follow exponential backoff
+
+  retry:
+    base_delay_ms: 200
+    max_delay_ms: 5000
+    total_call_budget_ms: 15000
+    # Jitter is full-uniform per api-orchestrator.md §5.1.
+
+  consensus:
+    algorithm: weighted-majority         # weighted-majority | bft (v0.2)
+    low_confidence_threshold: 0.35       # winner.weight below this → IsLowConfidence=true
+    minimum_critics: 1                   # AIMRP-Strict deployments may set 2+
+
+  reputation:
+    delta_factor: 0.1                    # delta = (critic_overall - 0.5) * delta_factor
+    persistence: filesystem              # filesystem | postgres | sqlite
+    store_path: "./reputation.db"
+
+  peer_selection:
+    default_filter:
+      max_latency_ms: 500
+      min_reputation: 0.0
+      compliance_level: aimrp-safe
+
+  dht:
+    bootstrap_address: "bootstrap.aimrp.example.com:4000"
+    bootstrap_nodes:
+      - { address: "bootstrap-1.example.com", port: 4000 }
+      - { address: "bootstrap-2.example.com", port: 4000 }
+    refresh_interval_seconds: 1800
+
+  observability:
+    log_level: info
+    metrics_endpoint: "0.0.0.0:9090"

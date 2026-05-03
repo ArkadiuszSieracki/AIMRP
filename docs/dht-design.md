@@ -1,6 +1,6 @@
 # AIMRP DHT Design
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 3
 
 ## 1. Purpose
@@ -74,6 +74,82 @@ Key format: `aimrp:peer:{peer_id}`
 
 Default TTL: 3600 seconds. Minimum: 60 seconds.
 
+### 4.5 Example Manifest (Canonical JSON)
+
+```json
+{
+  "endpoints": [{ "address": "peer-eu-1.example.org:8080", "type": "http-json" }],
+  "models": [
+    {
+      "avg_latency_ms": 180,
+      "max_context": 8192,
+      "max_tokens": 1024,
+      "name": "llama-3.2-3b"
+    }
+  ],
+  "nonce": "f6a4b9e0-1c2d-4e5b-9a3f-7c8d1e2b0a4c",
+  "peer_id": "a3f9c2d1e5b8f4a7c0d3e6b9f2a5c8d1e4b7f0a3c6d9e2b5f8a1c4d7e0b3f6a9",
+  "protocol_version": "0.1",
+  "pubkey": "oXk2mIQ2k0Qo8u8vPGrqkqL3fXxKqzWqGv1d2yFq0YA=",
+  "reputation_samples": 17,
+  "reputation_score": 0.42,
+  "roles": ["planner", "reasoner"],
+  "timestamp": "2026-05-02T10:15:30Z",
+  "ttl_seconds": 3600,
+  "signature": "MEUCIQDx...=="
+}
+```
+
+Keys are sorted alphabetically per the canonical serialization algorithm (RFC §3.2.1). The `signature` field is excluded from the bytes that are signed but is present in the published record.
+
+### 4.6 Record Size Budget
+
+A conformant manifest MUST fit within Kademlia STORE limits.
+
+| Component | Typical bytes | Cap |
+|---|---|---|
+| Header fields (peer_id, pubkey, timestamp, nonce, signature) | ~280 | — |
+| `endpoints[]` (1 entry, http-json) | ~70 | 4 entries |
+| `roles[]` (1–4 entries) | ~40 | — |
+| `models[]` (1 entry) | ~150 | 8 entries |
+| Reputation block | ~40 | — |
+
+Maximum serialized size of a `PeerManifest` MUST NOT exceed **8 KiB** (8192 bytes) in canonical JSON. DHT nodes MUST reject larger STORE requests with `manifest_invalid`. Serialized proto3 binary form is RECOMMENDED for nodes near the cap.
+
+### 4.7 Manifest Lifecycle Diagram
+
+```
+             ┌────────────────────────┐
+             │  generate / load   │
+             │   Ed25519 keypair  │
+             └─────────┬──────────┘
+                       ▼
+             ┌────────────────────────┐
+             │  build PeerManifest│
+             │  + protocol_version│
+             │  + nonce + ts      │
+             └─────────┬──────────┘
+                       ▼
+             ┌────────────────────────┐
+             │ sign(canonical(M)) │
+             └─────────┬──────────┘
+                       ▼
+             ┌────────────────────────┐
+             │   PUBLISHED        │◀──────────┐
+             │   (in DHT)         │           │
+             └─────────┬──────────┘           │
+               every TTL/2                       │ refresh
+                       │ (re-sign with new      │ (timestamp
+                       │  timestamp + nonce)    │  + nonce)
+                       └──────────────────────────────┘
+                       │
+     graceful shutdown / TTL expiry
+                       ▼
+             ┌────────────────────────┐
+             │ EXPIRED / WITHDRAWN │
+             └────────────────────────┘
+```
+
 ### 4.4 Signature Coverage
 
 Signature MUST cover the concatenation (canonical JSON or proto binary) of all fields except `signature` itself.
@@ -87,6 +163,30 @@ Consumers MUST verify signature before using any manifest data.
 find_peers(role=PLANNER)
 find_peers(role=REASONER, max_latency_ms<300)
 find_peers(role=CRITIC, model_name_hint~"llama", min_reputation>0.2)
+```
+
+**Wire shape (DhtLookupRequest, JSON):**
+
+```json
+{
+  "filter": {
+    "role": "reasoner",
+    "max_latency_ms": 300,
+    "model_name_hint": "llama",
+    "min_reputation": 0.2
+  },
+  "max_results": 10
+}
+```
+
+**Example response:**
+
+```json
+{
+  "peers": [
+    { "peer_id": "a3f9c2...", "endpoints": [{ "type": "http-json", "address": "peer-eu-1.example.org:8080" }], "roles": ["reasoner"], "reputation_score": 0.42 }
+  ]
+}
 ```
 
 ### 5.2 PeerFilter Fields
@@ -136,6 +236,20 @@ every (TTL / 2) seconds:
   re-sign
   re-publish
 ```
+
+### 6.2.1 Retry / Backoff for Join and Refresh
+
+Join and refresh failures MUST follow exponential backoff with jitter, identical to the orchestrator retry policy (api-orchestrator.md §5.1):
+
+```
+base_delay_ms = 1000
+max_delay_ms  = 60_000
+max_attempts  = unlimited (refresh)
+max_attempts  = 5         (initial join)
+attempt_delay(n) = random_uniform(0, min(max_delay_ms, base_delay_ms * 2^n))
+```
+
+If initial join exceeds `max_attempts`, peer MUST fail startup with `bootstrap_failed` (RFC §4.4). If refresh fails for the entire TTL window, the manifest MUST be considered expired by other peers; the local peer MUST keep retrying with backoff until success or shutdown.
 
 ### 6.3 Leave
 

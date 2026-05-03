@@ -1,6 +1,6 @@
 # AIMRP State Machines
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 6+
 
 ## 1. Peer State Machine

@@ -1,0 +1,34 @@
+# AIMRP Peer — planner-only profile
+# Decomposes problems into structured task steps. Requires a model with
+# strong instruction-following + JSON-list output (GPT-4o, Claude Sonnet,
+# Llama 3.1 70B+). Small models tend to produce malformed step lists.
+
+peer:
+  identity:
+    key_path: "./peer-planner-key.pem"
+
+  network:
+    listen_address: "0.0.0.0:8080"
+    public_address: "planner-1.example.com:8080"
+
+  roles:
+    - planner
+
+  model_adapter:
+    type: openai-compatible
+    endpoint: https://api.openai.com/v1
+    model: gpt-4o
+    api_key: "${OPENAI_API_KEY}"
+    # Sampling tuned for deterministic structured output
+    temperature: 0.1
+    top_p: 0.95
+
+  dht:
+    bootstrap_address: "bootstrap.aimrp.example.com:4000"
+    ttl_seconds: 3600
+
+  liveness:
+    heartbeat_interval_seconds: 60
+
+  health:
+    interval_seconds: 30                # model healthcheck cadence

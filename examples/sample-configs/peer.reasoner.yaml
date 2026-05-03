@@ -1,0 +1,32 @@
+# AIMRP Peer — reasoner profile
+# General-purpose task executor. Compatible with most instruction-following
+# models. This is the most common role and the recommended starting point.
+
+peer:
+  identity:
+    key_path: "./peer-reasoner-key.pem"
+
+  network:
+    listen_address: "0.0.0.0:8080"
+    public_address: "reasoner-1.example.com:8080"
+
+  roles:
+    - reasoner
+
+  model_adapter:
+    type: openai-compatible
+    endpoint: http://localhost:11434/v1   # Ollama default
+    model: llama3.2:3b
+    api_key: ""
+    temperature: 0.7
+    top_p: 1.0
+
+  dht:
+    bootstrap_address: "bootstrap.aimrp.example.com:4000"
+    ttl_seconds: 3600
+
+  liveness:
+    heartbeat_interval_seconds: 60
+
+  health:
+    interval_seconds: 30

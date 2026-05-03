@@ -1,7 +1,31 @@
 # AIMRP Peer Lifecycle
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 5
+
+## 0. Lifecycle Overview
+
+```
+   ┌─────────┐   load_config + keypair    ┌────────────┐
+   │  INIT   │ ─────────────────────▶ │  STARTING  │
+   └─────────┘                          └─────│──────┘
+                                            healthcheck model
+                                            DHT join + publish
+                                                  ▼
+                                            ┌─────────────┐
+   ┌─────────────┐   model down       │  RUNNING    │◄────┐
+   │ DEGRADED    │ ◀───────────────── │  (steady)   │    │
+   │ (4xx infer) │   model recovers │             │    │ refresh
+   └─────│──────┘ ─────────────────▶ └─────┬───────┘    │ (TTL/2)
+         │                                  │           ────┘
+         │ SIGTERM                          │ SIGTERM
+         ▼                                  ▼
+   ┌─────────────┐ drain in-flight     ┌───────────────┐
+   │  DRAINING   │ ───────────────────▶ │  STOPPED      │
+   └─────────────┘ DHT leave           └───────────────┘
+```
+
+State set: `INIT → STARTING → RUNNING ⇄ DEGRADED → DRAINING → STOPPED`. Implementations MUST expose the current state via internal logging and SHOULD expose it via a local `/healthz` endpoint (out of normative scope).
 
 ## 1. Startup Sequence
 
@@ -17,14 +41,21 @@ Sprint: 5
    - nonce = random UUID
    - ttl_seconds from config (default 3600)
    - sign manifest with private key
-4. Join DHT network
+4. Healthcheck model backend
+   - call IModelAdapter.IsAvailableAsync()
+   - on failure: log warning; transition to DEGRADED
+   - on success: transition continues
+5. Join DHT network
    - DhtClient.JoinAsync(bootstrap_address)
-5. Publish manifest
+   - retry with exponential backoff (base 1s, max 60s, max_attempts=5)
+   - on full failure: exit with `bootstrap_failed`
+6. Publish manifest
    - DhtClient.PublishAsync(signed manifest)
-6. Start HTTP API server
+7. Start HTTP API server
    - listen on config.network.listen_address
-7. Start DHT refresh loop
+8. Start DHT refresh loop
    - publish updated manifest every (ttl_seconds / 2)
+   - on refresh failure: exponential backoff (base 1s, max 60s, unbounded retries)
 ```
 
 ## 2. Steady State
@@ -83,3 +114,31 @@ If a peer cannot fulfill a role task (e.g., model error), it returns `model_erro
 - Peers are considered live while their DHT manifest is within TTL.
 - Orchestrators may perform liveness checks (GET /capabilities before task assignment).
 - If a peer fails to respond within `liveness_window_seconds`, it is excluded from routing for that session.
+
+## 8. Model Healthcheck
+
+Peers MUST periodically validate the model backend:
+
+- **Interval:** every `health_interval_seconds` (default 30s).
+- **Probe:** `IModelAdapter.IsAvailableAsync()` — lightweight call (e.g. list-models, /healthz, or a 1-token completion).
+- **Failure handling:**
+  - 1–2 consecutive failures → log warning, stay RUNNING.
+  - ≥ 3 consecutive failures → transition to DEGRADED, return `peer_unavailable` on `/infer`, `/plan`, `/score`.
+  - On recovery (1 successful probe) → transition back to RUNNING.
+- **Manifest impact:** while in DEGRADED, the peer SHOULD continue refreshing its manifest (so it remains discoverable for capability queries) but `/capabilities` MUST report `compliance_level` unchanged. AIMRP-Strict deployments MAY withdraw the manifest while degraded.
+
+## 9. Dynamic Role Change
+
+A peer MAY change its advertised roles at runtime (e.g. operator adds `critic` to a previously reasoner-only peer):
+
+1. Update local config (`roles:` list).
+2. Rebuild `PeerManifest` with new `roles[]`, fresh `nonce`, current `timestamp`.
+3. Re-sign and publish via `DhtClient.PublishAsync`.
+4. Begin accepting requests for the new role at the next inbound request after publication.
+
+Normative constraints:
+
+- Role changes MUST NOT change `peer_id` (same keypair).
+- A peer MUST NOT remove a role while it has in-flight tasks for that role; drain first.
+- After a role addition, the orchestrator may not discover the new capability until it re-queries the DHT (Kademlia eventual consistency).
+- Role removal does not revoke historical reputation tied to that role.

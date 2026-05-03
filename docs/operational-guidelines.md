@@ -1,6 +1,6 @@
 # AIMRP Operational Guidelines
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 6+
 
 Recommendations for deploying AIMRP peers and orchestrators in production environments.

@@ -1,0 +1,33 @@
+# AIMRP Peer — critic profile
+# Scores candidate answers per criterion (logic, factuality, relevance,
+# completeness, safety). Requires structured numeric output; benefits from
+# a model with strong calibration.
+
+peer:
+  identity:
+    key_path: "./peer-critic-key.pem"
+
+  network:
+    listen_address: "0.0.0.0:8080"
+    public_address: "critic-1.example.com:8080"
+
+  roles:
+    - critic
+
+  model_adapter:
+    type: anthropic
+    endpoint: https://api.anthropic.com/v1/messages
+    model: claude-3-5-sonnet-20241022
+    api_key: "${ANTHROPIC_API_KEY}"
+    temperature: 0.0                      # critics should be deterministic
+    top_p: 1.0
+
+  dht:
+    bootstrap_address: "bootstrap.aimrp.example.com:4000"
+    ttl_seconds: 3600
+
+  liveness:
+    heartbeat_interval_seconds: 60
+
+  health:
+    interval_seconds: 30

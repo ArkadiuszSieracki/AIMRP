@@ -1,9 +1,41 @@
 ﻿# How to Implement Your Own AIMRP Peer
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 6
 
 This guide walks through building a minimal AIMRP-compatible peer node. It assumes .NET 8+ and access to at least one model backend (Ollama locally or any OpenAI-compatible API).
+
+## 0. Minimal Peer Architecture
+
+```
+          ┌──────────────────────────────┐
+  HTTP ─▶│ ApiHost (Kestrel / ASP.NET)  │◄── X-AIMRP-Version validation
+          │   │ /capabilities             │
+          │   │ /plan  /infer  /score    │
+          └───┬───────────────────────────┘
+              ▼
+  ┌─────────────────┐   ┌───────────────────────┐
+  │ RoleHandlers   │─▶│ IModelAdapter         │─▶ Ollama / OpenAI / vLLM
+  │  Planner       │   │   CompleteAsync       │
+  │  Reasoner      │   │   IsAvailableAsync    │
+  │  Critic        │   └───────────────────────┘
+  │  Retriever     │
+  └───┬─────────────┘
+      ▼
+  ┌────────────────┐         ┌────────────────┐
+  │ Signer (Ed25519)│─────────▶│ IDhtClient    │──▶ Kademlia DHT
+  └────────────────┘         │  Publish      │
+                            │  Lookup       │
+                            │  Join / Leave │
+                            └────────────────┘
+```
+
+Key separations:
+- **ApiHost** owns transport concerns (headers, content-type, body limits).
+- **RoleHandlers** own per-role prompt assembly and response shaping.
+- **IModelAdapter** is the only place that knows about the backend (Ollama, OpenAI, etc.).
+- **Signer** is invoked exactly once per outbound signed payload (manifest, plan, infer, score).
+- **IDhtClient** isolates Kademlia mechanics from the rest of the peer.
 
 ## 1. Prerequisites
 
@@ -205,6 +237,72 @@ POST /v1/chat/completions
 
 Read `choices[0].message.content` as the completion.
 
+### 9.1 Minimal IModelAdapter Implementation (OpenAI-compatible)
+
+```csharp
+public sealed class OpenAiCompatibleAdapter : IModelAdapter
+{
+    private readonly HttpClient _http;
+    private readonly string _model;
+
+    public OpenAiCompatibleAdapter(HttpClient http, string endpoint, string model, string? apiKey)
+    {
+        _http = http;
+        _http.BaseAddress = new Uri(endpoint.TrimEnd('/') + "/");
+        _model = model;
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            _http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        }
+    }
+
+    public async Task<ModelAdapterResult> CompleteAsync(
+        ModelAdapterRequest request, CancellationToken ct = default)
+    {
+        var body = new
+        {
+            model       = string.IsNullOrEmpty(request.ModelName) ? _model : request.ModelName,
+            messages    = new[]
+            {
+                new { role = "system", content = request.SystemPrompt ?? string.Empty },
+                new { role = "user",   content = request.Prompt }
+            },
+            max_tokens  = request.MaxTokens,
+            temperature = request.Temperature ?? 0.7,
+            top_p       = request.TopP       ?? 1.0,
+            stop        = request.Stop?.ToArray() ?? Array.Empty<string>()
+        };
+
+        using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
+        resp.EnsureSuccessStatusCode();
+
+        using var stream = await resp.Content.ReadAsStreamAsync(ct);
+        using var doc    = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        var root       = doc.RootElement;
+        var completion = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+        var usage      = root.TryGetProperty("usage", out var u)
+            ? new UsageStats(u.GetProperty("prompt_tokens").GetUInt32(), u.GetProperty("completion_tokens").GetUInt32())
+            : new UsageStats(0, 0);
+
+        return new ModelAdapterResult(completion, usage, ConfidenceSource: "heuristic", Confidence: 0.75, ModelUsed: body.model);
+    }
+
+    public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await _http.GetAsync("models", ct);
+            return resp.IsSuccessStatusCode;
+        }
+        catch { return false; }
+    }
+}
+```
+
+This is intentionally minimal. Production peers SHOULD also: extract logprobs when the backend exposes them, surface `model_error` on parse failures, and apply per-call timeouts.
+
 ## 10. Security Checklist
 
 Before connecting to a shared network:
@@ -222,3 +320,18 @@ Before connecting to a shared network:
 - Join a shared DHT to discover other peers: update `dht.bootstrap_address`
 - Monitor your reputation score via the orchestrator's peer listing
 - Read the full RFC: [docs/rfc/RFC-AIMRP-0.1.md](rfc/RFC-AIMRP-0.1.md)
+
+## 12. Common Pitfalls
+
+| # | Pitfall | Symptom | Fix |
+|---|---|---|---|
+| 1 | Signing the **non-canonical** payload | Other peers reject your manifest with `signature_invalid` | Apply RFC §3.2.1 canonical JSON (sorted keys, NFC, no whitespace) **before** Ed25519 sign. |
+| 2 | Reusing `nonce` across refreshes | DHT validators drop refresh as replay | Generate a fresh UUID v4 on every publish/refresh. |
+| 3 | Logging the private key during init | Catastrophic key disclosure | Never log `Span<byte>` for private key material; redact at log boundary. |
+| 4 | Returning `confidence` outside [0.0, 1.0] | Orchestrator weighting blows up | Clamp the output of `exp(mean(logprob))`; fall back to 0.75 when logprobs absent. |
+| 5 | Ignoring `X-AIMRP-Version` / `AIMRP-Version` | Cross-version traffic reaches business logic | Validate header in middleware; return `version_unsupported` (HTTP 400) for any mismatch. |
+| 6 | Sharing a single `HttpClient` per request | Socket exhaustion under load | Use `IHttpClientFactory` or a long-lived singleton per backend. |
+| 7 | Treating `/infer.prompt` as trusted | Prompt injection / shell exec / SSRF | Only pass `prompt` to the model adapter; never to `Process.Start`, eval, or unconstrained URL fetch. |
+| 8 | Hardcoding the bootstrap node IP | Peer becomes undiscoverable when bootstrap rotates | Allow multiple `bootstrap_nodes`, support DNS SRV (`_aimrp-dht._tcp.<domain>`). |
+| 9 | Crashing on transient model errors | Peer enters reboot loop, manifest expires | Catch in `IModelAdapter.CompleteAsync`; return `model_error` and stay RUNNING/DEGRADED. |
+| 10 | Forgetting to drain on SIGTERM | Orchestrators see truncated responses | Stop accepting new requests, wait for in-flight, **then** `DhtClient.LeaveAsync()`. |

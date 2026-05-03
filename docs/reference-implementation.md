@@ -1,6 +1,6 @@
 # AIMRP Reference Implementation (Conceptual)
 
-Version: 0.1  
+Version: 0.1.0  
 Sprint: 6+
 
 This document describes the reference implementation of AIMRP in pseudocode and flow diagrams. No actual code is provided — this is a specification aid.
